@@ -20,7 +20,11 @@ mongoose.connect(process.env.MONGODB_URI, {
     useUnifiedTopology: true
 })
 .then(() => console.log('Connected to MongoDB Atlas'))
-.catch(err => console.error('MongoDB connection error:', err));
+.catch(err => {
+    console.error('MongoDB connection error:', err);
+    // Exit the application if the database connection fails
+    process.exit(1); 
+});
 
 // User schema
 const userSchema = new mongoose.Schema({
@@ -82,15 +86,13 @@ app.post('/api/register-donor', async (req, res) => {
 
 app.post('/api/send-alert', async (req, res) => {
     try {
-        // ===== PASSWORD VALIDATION LOGIC ADDED =====
         const { hospitalName, area, bloodGroup, additionalInfo, password } = req.body;
         
-        // 1. Check if the provided password matches the one in the .env file
+        // Password validation
         if (!password || password !== process.env.HOSPITAL_ALERT_PASSWORD) {
             return res.status(401).json({ message: 'Invalid password. You are not authorized to send alerts.' });
         }
-        // ============================================
-
+        
         // Validate other inputs
         if (!hospitalName || !area || !bloodGroup) {
             return res.status(400).json({ message: 'Hospital name, area, and blood group are required' });
@@ -101,7 +103,6 @@ app.post('/api/send-alert', async (req, res) => {
         if (bloodGroup !== 'Any') {
             query.bloodGroup = bloodGroup;
         }
-        // If 'All Areas' is selected, remove area from the query
         if (area === 'All') {
             delete query.area;
         }
@@ -109,7 +110,6 @@ app.post('/api/send-alert', async (req, res) => {
         const donors = await User.find(query);
         
         if (donors.length === 0) {
-            // Use a more specific message if no donors are found
             const specificAreaMessage = area === 'All' ? 'in any area' : `in the ${area} area`;
             return res.status(404).json({ message: `No donors found with the required blood group ${specificAreaMessage}.` });
         }
@@ -135,7 +135,6 @@ app.post('/api/send-alert', async (req, res) => {
                 failedSends++;
                 failedNumbers.push(donor.phone);
                 
-                // If it's an invalid number error, remove it from the database
                 if (twilioError.code === 21211) {
                     console.log(`Removing invalid number from database: ${donor.phone}`);
                     await User.deleteOne({ phone: donor.phone });
