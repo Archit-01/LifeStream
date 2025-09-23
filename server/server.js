@@ -20,7 +20,11 @@ mongoose.connect(process.env.MONGODB_URI, {
     useUnifiedTopology: true
 })
 .then(() => console.log('Connected to MongoDB Atlas'))
-.catch(err => console.error('MongoDB connection error:', err));
+.catch(err => {
+    console.error('MongoDB connection error:', err);
+    // Exit the application if the database connection fails
+    process.exit(1); 
+});
 
 // User schema
 const userSchema = new mongoose.Schema({
@@ -32,6 +36,18 @@ const userSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model('User', userSchema);
+
+// Blood Bank schema
+const bloodBankSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    address: { type: String, required: true },
+    phone: { type: String, required: true },
+    lat: { type: Number, required: true },
+    lng: { type: Number, required: true },
+    area: { type: String, required: true }
+});
+
+const BloodBank = mongoose.model('BloodBank', bloodBankSchema);
 
 // Twilio client
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -82,15 +98,13 @@ app.post('/api/register-donor', async (req, res) => {
 
 app.post('/api/send-alert', async (req, res) => {
     try {
-        // ===== PASSWORD VALIDATION LOGIC ADDED =====
         const { hospitalName, area, bloodGroup, additionalInfo, password } = req.body;
         
-        // 1. Check if the provided password matches the one in the .env file
+        // Password validation
         if (!password || password !== process.env.HOSPITAL_ALERT_PASSWORD) {
             return res.status(401).json({ message: 'Invalid password. You are not authorized to send alerts.' });
         }
-        // ============================================
-
+        
         // Validate other inputs
         if (!hospitalName || !area || !bloodGroup) {
             return res.status(400).json({ message: 'Hospital name, area, and blood group are required' });
@@ -101,7 +115,6 @@ app.post('/api/send-alert', async (req, res) => {
         if (bloodGroup !== 'Any') {
             query.bloodGroup = bloodGroup;
         }
-        // If 'All Areas' is selected, remove area from the query
         if (area === 'All') {
             delete query.area;
         }
@@ -109,7 +122,6 @@ app.post('/api/send-alert', async (req, res) => {
         const donors = await User.find(query);
         
         if (donors.length === 0) {
-            // Use a more specific message if no donors are found
             const specificAreaMessage = area === 'All' ? 'in any area' : `in the ${area} area`;
             return res.status(404).json({ message: `No donors found with the required blood group ${specificAreaMessage}.` });
         }
@@ -135,7 +147,6 @@ app.post('/api/send-alert', async (req, res) => {
                 failedSends++;
                 failedNumbers.push(donor.phone);
                 
-                // If it's an invalid number error, remove it from the database
                 if (twilioError.code === 21211) {
                     console.log(`Removing invalid number from database: ${donor.phone}`);
                     await User.deleteOne({ phone: donor.phone });
@@ -172,6 +183,48 @@ app.get('/api/donors', async (req, res) => {
     }
 });
 
+app.get('/api/bloodbanks', async (req, res) => {
+    try {
+        const { area } = req.query;
+        let query = {};
+        
+        if (area && area !== 'All') query.area = area;
+        
+        const bloodBanks = await BloodBank.find(query);
+        res.json(bloodBanks);
+    } catch (error) {
+        console.error('Get blood banks error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+app.post('/api/bloodbanks', async (req, res) => {
+    try {
+        // This endpoint would typically be protected in a real application
+        const { name, address, phone, lat, lng, area } = req.body;
+        
+        // Validate input
+        if (!name || !address || !phone || !lat || !lng || !area) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+        
+        // Check if blood bank already exists
+        const existingBank = await BloodBank.findOne({ name, address });
+        if (existingBank) {
+            return res.status(400).json({ message: 'Blood bank already exists' });
+        }
+        
+        // Create new blood bank
+        const newBloodBank = new BloodBank({ name, address, phone, lat, lng, area });
+        await newBloodBank.save();
+        
+        res.status(201).json({ message: 'Blood bank added successfully' });
+    } catch (error) {
+        console.error('Add blood bank error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
 app.delete('/api/donor/:phone', async (req, res) => {
     try {
         const { phone } = req.params;
@@ -192,8 +245,91 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+// Initialize sample blood banks if the collection is empty
+async function initializeBloodBanks() {
+    try {
+        const count = await BloodBank.countDocuments();
+        if (count === 0) {
+            console.log('Initializing sample blood banks...');
+            
+            const sampleBloodBanks = [
+                {
+                    name: "Ruby Hall Clinic Blood Bank",
+                    address: "40, Sassoon Road, Pune, Maharashtra 411001",
+                    phone: "+91-20-26122101",
+                    lat: 18.5204,
+                    lng: 73.8567,
+                    area: "Shivajinagar"
+                },
+                {
+                    name: "KEM Hospital Blood Bank",
+                    address: "489, Rasta Peth, Sardar Moodliar Road, Pune, Maharashtra 411011",
+                    phone: "+91-20-26122101",
+                    lat: 18.5158,
+                    lng: 73.8550,
+                    area: "Shivajinagar"
+                },
+                {
+                    name: "Sahyadri Hospital Blood Bank",
+                    address: "Kothrud, Pune, Maharashtra 411038",
+                    phone: "+91-20-67222222",
+                    lat: 18.5081,
+                    lng: 73.8165,
+                    area: "Kothrud"
+                },
+                {
+                    name: "Jehangir Hospital Blood Bank",
+                    address: "32, Sasoon Road, Pune, Maharashtra 411001",
+                    phone: "+91-20-66819999",
+                    lat: 18.5236,
+                    lng: 73.8478,
+                    area: "Shivajinagar"
+                },
+                {
+                    name: "Sanjeevan Hospital Blood Bank",
+                    address: "2, Panchavati, Off Karve Road, Pune, Maharashtra 411037",
+                    phone: "+91-20-25447777",
+                    lat: 18.5154,
+                    lng: 73.8298,
+                    area: "Kothrud"
+                },
+                {
+                    name: "Aditya Birla Memorial Hospital Blood Bank",
+                    address: "Aditya Birla Hospital Marg, Thergaon, Pimpri-Chinchwad, Maharashtra 411033",
+                    phone: "+91-20-30717100",
+                    lat: 18.6279,
+                    lng: 73.7997,
+                    area: "Pimpri"
+                },
+                {
+                    name: "Deenanath Mangeshkar Hospital Blood Bank",
+                    address: "Erandwane, Pune, Maharashtra 411004",
+                    phone: "+91-20-40151515",
+                    lat: 18.5150,
+                    lng: 73.8290,
+                    area: "Kothrud"
+                },
+                {
+                    name: "Sassoon General Hospital Blood Bank",
+                    address: "Sassoon Road, Pune, Maharashtra 411001",
+                    phone: "+91-20-26122101",
+                    lat: 18.5236,
+                    lng: 73.8478,
+                    area: "Shivajinagar"
+                }
+            ];
+            
+            await BloodBank.insertMany(sampleBloodBanks);
+            console.log('Sample blood banks initialized successfully');
+        }
+    } catch (error) {
+        console.error('Error initializing blood banks:', error);
+    }
+}
+
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Visit http://localhost:${PORT} to access the application`);
+    await initializeBloodBanks();
 });
