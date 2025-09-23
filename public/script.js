@@ -40,6 +40,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (tabId === 'directory') {
                     loadDirectoryData();
                 }
+                // If the bloodbanks tab is now active, initialize the map
+                if (tabId === 'bloodbanks') {
+                    initMap();
+                }
             }
         });
     });
@@ -248,6 +252,252 @@ document.addEventListener('DOMContentLoaded', function() {
         mostCommonBloodElement.textContent = mostCommon;
     }
 
+    // --- Blood Banks Functionality ---
+    const searchBloodbankInput = document.getElementById('search-bloodbank');
+    const locateMeBtn = document.getElementById('locate-me');
+    let map;
+    let markers = [];
+    let userLocationMarker = null;
+    let bloodBanks = [];
+
+    // Sample blood bank data
+    const sampleBloodBanks = [
+        {
+            name: "Ruby Hall Clinic Blood Bank",
+            address: "40, Sassoon Road, Pune, Maharashtra 411001",
+            phone: "+91-20-26122101",
+            lat: 18.5204,
+            lng: 73.8567,
+            area: "Shivajinagar"
+        },
+        {
+            name: "KEM Hospital Blood Bank",
+            address: "489, Rasta Peth, Sardar Moodliar Road, Pune, Maharashtra 411011",
+            phone: "+91-20-26122101",
+            lat: 18.5158,
+            lng: 73.8550,
+            area: "Shivajinagar"
+        },
+        {
+            name: "Sahyadri Hospital Blood Bank",
+            address: "Kothrud, Pune, Maharashtra 411038",
+            phone: "+91-20-67222222",
+            lat: 18.5081,
+            lng: 73.8165,
+            area: "Kothrud"
+        },
+        {
+            name: "Jehangir Hospital Blood Bank",
+            address: "32, Sasoon Road, Pune, Maharashtra 411001",
+            phone: "+91-20-66819999",
+            lat: 18.5236,
+            lng: 73.8478,
+            area: "Shivajinagar"
+        },
+        {
+            name: "Sanjeevan Hospital Blood Bank",
+            address: "2, Panchavati, Off Karve Road, Pune, Maharashtra 411037",
+            phone: "+91-20-25447777",
+            lat: 18.5154,
+            lng: 73.8298,
+            area: "Kothrud"
+        },
+        {
+            name: "Aditya Birla Memorial Hospital Blood Bank",
+            address: "Aditya Birla Hospital Marg, Thergaon, Pimpri-Chinchwad, Maharashtra 411033",
+            phone: "+91-20-30717100",
+            lat: 18.6279,
+            lng: 73.7997,
+            area: "Pimpri"
+        },
+        {
+            name: "Deenanath Mangeshkar Hospital Blood Bank",
+            address: "Erandwane, Pune, Maharashtra 411004",
+            phone: "+91-20-40151515",
+            lat: 18.5150,
+            lng: 73.8290,
+            area: "Kothrud"
+        },
+        {
+            name: "Sassoon General Hospital Blood Bank",
+            address: "Sassoon Road, Pune, Maharashtra 411001",
+            phone: "+91-20-26122101",
+            lat: 18.5236,
+            lng: 73.8478,
+            area: "Shivajinagar"
+        }
+    ];
+
+    // Initialize the map with OpenStreetMap
+    function initMap() {
+        // Default center (Pune)
+        const pune = [18.5204, 73.8567];
+        
+        // Create the map
+        map = L.map('map').setView(pune, 12);
+        
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 18
+        }).addTo(map);
+
+        // Load blood banks
+        loadBloodBanks();
+        
+        // Set up search functionality
+        if (searchBloodbankInput) {
+            searchBloodbankInput.addEventListener('input', filterBloodBanks);
+        }
+        
+        // Set up locate me button
+        if (locateMeBtn) {
+            locateMeBtn.addEventListener('click', locateUser);
+        }
+    }
+
+    function loadBloodBanks() {
+        bloodBanks = sampleBloodBanks;
+        displayBloodBanks(bloodBanks);
+        addBloodBanksToMap(bloodBanks);
+    }
+
+    function displayBloodBanks(bloodBanks) {
+        const container = document.getElementById('bloodbanks-list-container');
+        if (!container) return;
+        
+        if (bloodBanks.length === 0) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-hospital"></i><h3>No blood banks found</h3><p>Try adjusting your search criteria.</p></div>';
+            return;
+        }
+        
+        container.innerHTML = bloodBanks.map((bank, index) => `
+            <div class="bloodbank-card" data-index="${index}">
+                <h4>${bank.name}</h4>
+                <p class="address">${bank.address}</p>
+                <p class="phone">${bank.phone}</p>
+            </div>
+        `).join('');
+        
+        // Add click event listeners to blood bank cards
+        document.querySelectorAll('.bloodbank-card').forEach(card => {
+            card.addEventListener('click', function() {
+                const index = parseInt(this.getAttribute('data-index'));
+                const bank = bloodBanks[index];
+                
+                // Highlight the selected card
+                document.querySelectorAll('.bloodbank-card').forEach(c => c.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Center the map on the selected blood bank
+                map.setView([bank.lat, bank.lng], 15);
+                
+                // Highlight the marker
+                markers[index].openPopup();
+            });
+        });
+    }
+
+    function addBloodBanksToMap(bloodBanks) {
+        // Clear existing markers
+        markers.forEach(marker => map.removeLayer(marker));
+        markers = [];
+        
+        bloodBanks.forEach((bank, index) => {
+            // Create custom icon
+            const bloodBankIcon = L.divIcon({
+                html: `<div style="background-color: #e94560; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; border: 3px solid white;">B</div>`,
+                className: 'bloodbank-marker',
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+            
+            const marker = L.marker([bank.lat, bank.lng], { icon: bloodBankIcon })
+                .addTo(map)
+                .bindPopup(`
+                    <div style="color: black; padding: 10px; max-width: 250px;">
+                        <h3 style="margin: 0 0 10px 0; color: #e94560;">${bank.name}</h3>
+                        <p style="margin: 5px 0;"><strong>Address:</strong> ${bank.address}</p>
+                        <p style="margin: 5px 0;"><strong>Phone:</strong> ${bank.phone}</p>
+                        <p style="margin: 5px 0;"><strong>Area:</strong> ${bank.area}</p>
+                    </div>
+                `);
+            
+            marker.on('click', () => {
+                // Highlight the corresponding card
+                document.querySelectorAll('.bloodbank-card').forEach(c => c.classList.remove('active'));
+                document.querySelector(`.bloodbank-card[data-index="${index}"]`).classList.add('active');
+            });
+            
+            markers.push(marker);
+        });
+    }
+
+    function filterBloodBanks() {
+        const searchTerm = searchBloodbankInput.value.toLowerCase();
+        const filteredBanks = bloodBanks.filter(bank => 
+            bank.name.toLowerCase().includes(searchTerm) || 
+            bank.address.toLowerCase().includes(searchTerm) ||
+            bank.area.toLowerCase().includes(searchTerm)
+        );
+        
+        displayBloodBanks(filteredBanks);
+        
+        // Clear existing markers and add filtered ones
+        markers.forEach(marker => map.removeLayer(marker));
+        markers = [];
+        addBloodBanksToMap(filteredBanks);
+    }
+
+    function locateUser() {
+        if (!navigator.geolocation) {
+            alert('Geolocation is not supported by this browser.');
+            return;
+        }
+        
+        locateMeBtn.disabled = true;
+        locateMeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Locating...';
+        
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const userLocation = {
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude
+                };
+                
+                // Center map on user location
+                map.setView([userLocation.lat, userLocation.lng], 14);
+                
+                // Add/update user location marker
+                if (userLocationMarker) {
+                    map.removeLayer(userLocationMarker);
+                }
+                
+                const userIcon = L.divIcon({
+                    html: `<div style="background-color: #2ecc71; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white;"></div>`,
+                    className: 'user-location-marker',
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                });
+                
+                userLocationMarker = L.marker([userLocation.lat, userLocation.lng], { icon: userIcon })
+                    .addTo(map)
+                    .bindPopup('Your Current Location')
+                    .openPopup();
+                
+                locateMeBtn.disabled = false;
+                locateMeBtn.innerHTML = '<i class="fas fa-location-arrow"></i> Locate Me';
+            },
+            (error) => {
+                console.error('Error getting location:', error);
+                alert('Unable to retrieve your location. Please ensure location services are enabled.');
+                
+                locateMeBtn.disabled = false;
+                locateMeBtn.innerHTML = '<i class="fas fa-location-arrow"></i> Locate Me';
+            }
+        );
+    }
+
     // --- Utility Functions ---
     function maskPhoneNumber(phone) {
         // Masks the phone number, e.g., +919876543210 -> +91******3210
@@ -268,5 +518,10 @@ document.addEventListener('DOMContentLoaded', function() {
             element.textContent = '';
             element.className = 'message';
         }, 5000);
+    }
+    
+    // Initialize map when bloodbanks tab is first loaded
+    if (document.querySelector('.tab-btn[data-tab="bloodbanks"].active')) {
+        initMap();
     }
 });
